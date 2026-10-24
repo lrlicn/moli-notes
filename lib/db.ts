@@ -116,12 +116,14 @@ export async function listFolders(): Promise<Folder[]> {
   return rows.map((r) => folderRowMapper(r));
 }
 
-/** 各文件夹直接条目数 + 汇总计数（侧边栏徽标用；只统计未删除条目） */
+/** 各文件夹直接条目数 + 汇总计数（侧边栏徽标与身份卡用；只统计未删除条目） */
 export async function entryCountsByFolder(): Promise<{
   byFolder: Record<string, number>;
   unsorted: number;
   total: number;
   trash: number;
+  /** 累计复制次数（含已删除条目，体现使用量） */
+  totalCopies: number;
 }> {
   const sql = await getDb();
   const rows = (await sql`
@@ -136,14 +138,16 @@ export async function entryCountsByFolder(): Promise<{
     SELECT
       SUM(CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END)::int AS total,
       SUM(CASE WHEN deleted_at IS NULL AND folder_id IS NULL THEN 1 ELSE 0 END)::int AS unsorted,
-      SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END)::int AS trash
+      SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END)::int AS trash,
+      COALESCE(SUM(copy_count), 0)::int AS total_copies
     FROM entries
-  `)[0] as { total: number | null; unsorted: number | null; trash: number | null };
+  `)[0] as { total: number | null; unsorted: number | null; trash: number | null; total_copies: number | null };
   return {
     byFolder,
     unsorted: row.unsorted || 0,
     total: row.total || 0,
     trash: row.trash || 0,
+    totalCopies: row.total_copies || 0,
   };
 }
 

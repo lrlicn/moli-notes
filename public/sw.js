@@ -1,5 +1,5 @@
 // MoliNotes Service Worker：静态资源缓存优先，页面导航网络优先（离线回退缓存页）
-const CACHE = "moli-notes-v1";
+const CACHE = "moli-notes-v2";
 const PRECACHE = ["/login", "/logo.svg", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -26,12 +26,13 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
 
-  // 静态资源（构建产物、图标、字体）：缓存优先
+  // 静态资源（构建产物、图标、字体、登录背景图）：缓存优先
   const isStatic =
     url.pathname.startsWith("/_next/static") ||
     url.pathname.startsWith("/_next/image") ||
     url.pathname === "/logo.svg" ||
     url.pathname === "/icon.svg" ||
+    url.pathname === "/login-bg.webp" ||
     url.pathname === "/apple-touch-icon.png";
   if (isStatic) {
     event.respondWith(

@@ -7,6 +7,10 @@ import { LogoIcon } from "@/components/icons";
 
 export const dynamic = "force-dynamic";
 
+// 登录背景图的极小模糊占位（sharp 从原图缩至 32px WebP 内联 base64）：23KB 主图下载期间先显模糊、加载完自动锐化
+const LOGIN_BG_BLUR =
+  "data:image/webp;base64,UklGRsIAAABXRUJQVlA4ILYAAABwBQCdASogABUAPrVQn0ynJKKiKAqo4BaJZACxHt8Bf+JQaY+683zRE05f8ZxWCmjXI/d+AP7o88OO/qIvEMIgj2h8NG83epwoVREGaDeG3aJ3tV9TExjmVhuePIKW3CxUuhaupQM+T1AAFVJCqMYI9DXysDfUF0QTHf7znIcg3NeMlnDBKaM/dvThG8h3icidsxctgS38924XVvF8wxIi1W9EziYxp22On4dTLzkOfZ2mJMJAAA==";
+
 export default async function LoginPage() {
   const store = await cookies();
   if (isAuthed(store.get(SESSION_COOKIE)?.value)) {
@@ -17,8 +21,19 @@ export default async function LoginPage() {
       {/* 圆角大卡片：铺满全屏（四边留 5px 边距），与主界面侧边栏的圆角卡片语言统一 */}
       <div className="mn-pop flex h-[calc(100dvh-10px)] w-full overflow-hidden rounded-[10px] border border-border-base bg-surface shadow-2xl">
         {/* 左侧品牌图区（桌面端）：Pexels 免费图库（Steve A Johnson, photo 29067690），Pexels License 可免费商用 */}
-        <div className="relative hidden w-[55%] shrink-0 lg:block">
-          <Image src="/login-bg.jpg" alt="" fill priority sizes="55vw" className="object-cover" />
+        {/* 预压缩 WebP（1400px/q72≈23KB）直出，unoptimized 绕过 /_next/image 运行时处理；priority 自动预加载 */}
+        <div className="relative hidden w-[55%] shrink-0 bg-[#151022] lg:block">
+          <Image
+            src="/login-bg.webp"
+            alt=""
+            fill
+            priority
+            unoptimized
+            placeholder="blur"
+            blurDataURL={LOGIN_BG_BLUR}
+            sizes="55vw"
+            className="object-cover"
+          />
           {/* 深色渐变遮罩：保证品牌文字可读、统一深紫调性 */}
           <div className="absolute inset-0 bg-gradient-to-t from-[#151022]/90 via-[#151022]/35 to-brand/30" />
           <div className="absolute inset-x-12 bottom-12 text-white">

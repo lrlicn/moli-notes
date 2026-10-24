@@ -6,7 +6,7 @@ import { ENTRY_DRAG_TYPE } from "@/lib/types";
 import type { Folder } from "@/lib/types";
 import FolderTree from "./FolderTree";
 import Tip from "./Tip";
-import { DownloadIcon, GridIcon, InboxIcon, LogoIcon, MoonIcon, SearchIcon, SunIcon, TrashIcon, UploadIcon, LogoutIcon, XIcon } from "./icons";
+import { DownloadIcon, GridIcon, InboxIcon, LogoIcon, MoonIcon, SearchIcon, SunIcon, TrashIcon, UploadIcon, LogoutIcon, HandWaveIcon, XIcon } from "./icons";
 
 export interface FolderCounts {
   byFolder: Record<string, number>;
@@ -14,6 +14,8 @@ export interface FolderCounts {
   total: number;
   /** 最近删除（回收站）条目数 */
   trash: number;
+  /** 累计复制次数（身份卡副行使用量展示） */
+  totalCopies: number;
 }
 
 interface SidebarProps {
@@ -183,36 +185,64 @@ export default function Sidebar(props: SidebarProps) {
         </button>
       </div>
 
-      <div className="flex items-center gap-1 px-3 py-2">
-        <Tip label="切换主题" side="top" align="start">
-          <button
-            type="button"
-            aria-label="切换主题"
-            onClick={props.onToggleTheme}
-            className="rounded-md p-2 text-muted-foreground hover:bg-surface hover:text-foreground"
-          >
-            <SunIcon width={16} height={16} className="dark:hidden" />
-            <MoonIcon width={16} height={16} className="hidden dark:block" />
-          </button>
-        </Tip>
-        {props.ownerLabel ? (
-          <span className="min-w-0 flex-1 truncate px-1 text-center text-xs">
-            <span className="font-medium text-brand">{props.ownerLabel}</span>
-            <span className="text-muted-foreground/70">的速查库</span>
+      {/* 身份卡片：头像 + 昵称/版本号，右侧主题与登出（登出按危险操作区分 hover 色） */}
+      <div className="px-3 pb-3">
+        <div className="flex items-center gap-2.5 rounded-xl bg-surface px-2.5 py-2 shadow-sm">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-sm font-bold text-brand-on">
+            {(props.ownerLabel ?? "模").slice(0, 1)}
           </span>
-        ) : (
-          <span className="min-w-0 flex-1 truncate px-1 text-center text-xs text-muted-foreground/70">v0.1.0</span>
-        )}
-        <Tip label="退出登录" side="top" align="end">
-          <button
-            type="button"
-            aria-label="退出登录"
-            onClick={props.onLogout}
-            className="rounded-md p-2 text-muted-foreground hover:bg-surface hover:text-foreground"
-          >
-            <LogoutIcon width={16} height={16} />
-          </button>
-        </Tip>
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="truncate text-sm font-medium">
+              {props.ownerLabel ? (
+                <span className="group/flip relative inline-block align-middle [perspective:800px]">
+                  {/* 翻转体：正面整行用户名，背面问候语；hover 时整行 rotateY 180° */}
+                  <span className="relative inline-block transition-transform duration-500 [transform-style:preserve-3d] group-hover/flip:[transform:rotateY(180deg)]">
+                    {/* 正面（块级，保证 backface 生效）：宽度撑开容器 */}
+                    <span className="inline-block [backface-visibility:hidden]">
+                      <span className="text-brand">{props.ownerLabel}</span>
+                      <span className="text-muted-foreground">的速查库</span>
+                    </span>
+                    {/* 背面：同尺寸居中，比正面短不会溢出 */}
+                    <span className="absolute inset-0 flex items-center justify-center whitespace-nowrap text-brand [transform:rotateY(180deg)] [backface-visibility:hidden]">
+                      你好
+                      <HandWaveIcon width={14} height={14} className="ml-1.5" />
+                    </span>
+                  </span>
+                </span>
+              ) : (
+                "模力笔记"
+              )}
+            </div>
+            <div className="truncate text-[11px] text-muted-foreground/70">
+              {props.ownerLabel
+                ? props.counts.totalCopies > 0
+                  ? `已帮你复制 ${props.counts.totalCopies.toLocaleString()} 次`
+                  : "还没有复制记录，从第一条开始"
+                : "v0.1.0"}
+            </div>
+          </div>
+          <Tip label="切换主题" side="top" align="end">
+            <button
+              type="button"
+              aria-label="切换主题"
+              onClick={props.onToggleTheme}
+              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
+            >
+              <SunIcon width={15} height={15} className="dark:hidden" />
+              <MoonIcon width={15} height={15} className="hidden dark:block" />
+            </button>
+          </Tip>
+          <Tip label="退出登录" side="top" align="end">
+            <button
+              type="button"
+              aria-label="退出登录"
+              onClick={props.onLogout}
+              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500"
+            >
+              <LogoutIcon width={15} height={15} />
+            </button>
+          </Tip>
+        </div>
       </div>
     </aside>
   );

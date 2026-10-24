@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 // 主界面容器：状态编排、数据加载、复制/置顶/删除、弹窗与搜索面板
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -29,7 +29,7 @@ type DialogState = { mode: "create"; folderId: string | null } | { mode: "edit";
 export default function AppShell({ ownerLabel }: { ownerLabel?: string }) {
   const router = useRouter();
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [counts, setCounts] = useState<FolderCounts>({ byFolder: {}, unsorted: 0, total: 0, trash: 0 });
+  const [counts, setCounts] = useState<FolderCounts>({ byFolder: {}, unsorted: 0, total: 0, trash: 0, totalCopies: 0 });
   const [entries, setEntries] = useState<Entry[]>([]);
   const [scope, setScope] = useState<Scope>({ type: "all" });
   const [loading, setLoading] = useState(true);
@@ -109,6 +109,7 @@ export default function AppShell({ ownerLabel }: { ownerLabel?: string }) {
     else if (scope.type === "folder") p.set("folderId", scope.id);
     else if (scope.type === "source") p.set("source", scope.value);
     else if (scope.type === "kind") p.set("kind", scope.value);
+    else if (scope.type === "deleted") p.set("deleted", "1");
     api<{ entries: Entry[] }>(`/api/entries?${p.toString()}`)
       .then((r) => {
         if (alive) {
@@ -157,6 +158,8 @@ export default function AppShell({ ownerLabel }: { ownerLabel?: string }) {
         lastCopyRef.current = { id: entry.id, at: now };
         if (counted) {
           api(`/api/entries/${entry.id}/touch`, { method: "POST" }).catch(() => {});
+          // 侧边栏身份卡副行「已帮你复制 N 次」本地即时 +1（与 touch 去重窗口一致）
+          setCounts((c) => ({ ...c, totalCopies: c.totalCopies + 1 }));
         }
         // 本地更新最近使用时间与复制次数（窗口内不重复 +1），不重排当前列表（避免跳动）
         const stamped = {
