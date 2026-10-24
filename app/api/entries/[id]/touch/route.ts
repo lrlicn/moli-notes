@@ -9,6 +9,6 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
   const denied = await requireAuth();
   if (denied) return denied;
   const { id } = await ctx.params;
-  touchEntry(id);
+  await touchEntry(id);
   return NextResponse.json({ ok: true });
 }

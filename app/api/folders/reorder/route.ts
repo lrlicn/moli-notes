@@ -27,11 +27,11 @@ export async function POST(req: NextRequest) {
   const items = body.items as { id?: unknown; parentId?: unknown; sortOrder?: unknown }[];
   const parsed: { id: string; parentId: string | null; sortOrder: number }[] = [];
   for (const it of items) {
-    if (typeof it?.id !== "string" || !getFolder(it.id)) {
+    if (typeof it?.id !== "string" || !(await getFolder(it.id))) {
       return NextResponse.json({ error: "文件夹不存在" }, { status: 400 });
     }
     const parentId = typeof it?.parentId === "string" && it.parentId ? it.parentId : null;
-    if (parentId && !getFolder(parentId)) {
+    if (parentId && !(await getFolder(parentId))) {
       return NextResponse.json({ error: "目标父文件夹不存在" }, { status: 400 });
     }
     if (typeof it?.sortOrder !== "number" || !Number.isFinite(it.sortOrder)) {
@@ -40,12 +40,12 @@ export async function POST(req: NextRequest) {
     parsed.push({ id: it.id, parentId, sortOrder: it.sortOrder });
   }
   // 防环：任何一项的新父级不能是它自身或其子孙
-  const all = listFolders();
+  const all = await listFolders();
   for (const it of parsed) {
     if (it.parentId && isDescendantOrSelf(it.id, it.parentId, all)) {
       return NextResponse.json({ error: "不能移动到自身或其子文件夹内" }, { status: 400 });
     }
   }
-  reorderFolders(parsed);
+  await reorderFolders(parsed);
   return NextResponse.json({ ok: true });
 }

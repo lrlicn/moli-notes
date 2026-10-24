@@ -23,7 +23,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const denied = await requireAuth();
   if (denied) return denied;
   const { id } = await ctx.params;
-  if (!getFolder(id)) return NextResponse.json({ error: "文件夹不存在" }, { status: 404 });
+  if (!(await getFolder(id))) return NextResponse.json({ error: "文件夹不存在" }, { status: 404 });
 
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "请求格式错误" }, { status: 400 });
@@ -31,18 +31,18 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (typeof body.name === "string") {
     const name = body.name.trim();
     if (!name) return NextResponse.json({ error: "文件夹名称不能为空" }, { status: 400 });
-    renameFolder(id, name);
+    await renameFolder(id, name);
   }
 
   if (body.parentId !== undefined) {
     const parentId = typeof body.parentId === "string" && body.parentId ? body.parentId : null;
-    if (parentId && !getFolder(parentId)) {
+    if (parentId && !(await getFolder(parentId))) {
       return NextResponse.json({ error: "目标文件夹不存在" }, { status: 400 });
     }
-    if (parentId && isDescendantOrSelf(id, parentId, listFolders())) {
+    if (parentId && isDescendantOrSelf(id, parentId, await listFolders())) {
       return NextResponse.json({ error: "不能移动到自身或其子文件夹内" }, { status: 400 });
     }
-    moveFolder(id, parentId);
+    await moveFolder(id, parentId);
   }
 
   return NextResponse.json({ ok: true });
@@ -52,7 +52,7 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
   const denied = await requireAuth();
   if (denied) return denied;
   const { id } = await ctx.params;
-  const ok = deleteFolderIfEmpty(id);
+  const ok = await deleteFolderIfEmpty(id);
   if (!ok) {
     return NextResponse.json({ error: "文件夹非空，请先清空其中的条目和子文件夹" }, { status: 400 });
   }

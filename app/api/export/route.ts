@@ -12,8 +12,8 @@ export async function GET() {
     app: "moli-notes",
     version: 1,
     exportedAt: new Date().toISOString(),
-    folders: listFolders(),
-    entries: listEntries({}),
+    folders: await listFolders(),
+    entries: await listEntries({}),
   };
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
   return new NextResponse(JSON.stringify(data, null, 2), {

@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   if (folderParam === "") opts.folderId = null;
   else if (folderParam) opts.folderId = folderParam;
 
-  return NextResponse.json({ entries: listEntries(opts) });
+  return NextResponse.json({ entries: await listEntries(opts) });
 }
 
 export async function POST(req: NextRequest) {
@@ -40,8 +40,8 @@ export async function POST(req: NextRequest) {
   if (!content) return NextResponse.json({ error: "内容不能为空" }, { status: 400 });
 
   const folderId = typeof body?.folderId === "string" && body.folderId ? body.folderId : null;
-  if (folderId && !getFolder(folderId)) {
+  if (folderId && !(await getFolder(folderId))) {
     return NextResponse.json({ error: "所属文件夹不存在" }, { status: 400 });
   }
-  return NextResponse.json({ entry: createEntry({ folderId, title, content, notes, source, sourceColor }) }, { status: 201 });
+  return NextResponse.json({ entry: await createEntry({ folderId, title, content, notes, source, sourceColor }) }, { status: 201 });
 }

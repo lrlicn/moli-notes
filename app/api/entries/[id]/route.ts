@@ -16,7 +16,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   // 从最近删除恢复
   if (body.restore === true) {
-    const entry = restoreEntry(id);
+    const entry = await restoreEntry(id);
     if (!entry) return NextResponse.json({ error: "条目不存在或不在回收站中" }, { status: 404 });
     return NextResponse.json({ entry });
   }
@@ -38,13 +38,13 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (body.pinned !== undefined) data.pinned = !!body.pinned;
   if (body.folderId !== undefined) {
     const folderId = typeof body.folderId === "string" && body.folderId ? body.folderId : null;
-    if (folderId && !getFolder(folderId)) {
+    if (folderId && !(await getFolder(folderId))) {
       return NextResponse.json({ error: "目标文件夹不存在" }, { status: 400 });
     }
     data.folderId = folderId;
   }
 
-  const entry = updateEntry(id, data);
+  const entry = await updateEntry(id, data);
   if (!entry) return NextResponse.json({ error: "条目不存在" }, { status: 404 });
   return NextResponse.json({ entry });
 }
@@ -56,9 +56,9 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
   const purge = new URL(req.url).searchParams.get("purge") === "1";
   if (purge) {
-    if (!purgeEntry(id)) return NextResponse.json({ error: "条目不存在或不在回收站中" }, { status: 404 });
+    if (!(await purgeEntry(id))) return NextResponse.json({ error: "条目不存在或不在回收站中" }, { status: 404 });
   } else {
-    softDeleteEntry(id);
+    await softDeleteEntry(id);
   }
   return NextResponse.json({ ok: true });
 }

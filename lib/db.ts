@@ -1,176 +1,95 @@
-// 数据层：SQLite（better-sqlite3），本地文件 data/moli-notes.db
-// 数据库懒加载：模块导入时不打开数据库（避免构建期多 worker 并发锁冲突），首次使用时初始化
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import path from "node:path";
+// 数据层：Neon Postgres（postgres.js 驱动，serverless 友好）
+// 懒加载：模块导入时不建连接，首次使用时初始化并建表（Vercel 平台由 Neon 集成注入 POSTGRES_URL）
+import postgres from "postgres";
 import type { Entry, Folder } from "./types";
 import { detectKind } from "./detect";
 
-// 数据目录：生产环境通过 MOLINOTES_DATA_DIR 指向持久卷挂载点，默认本地 ./data
-const DATA_DIR = process.env.MOLINOTES_DATA_DIR
-  ? path.resolve(process.env.MOLINOTES_DATA_DIR)
-  : path.join(process.cwd(), "data");
-
 declare global {
-  var __moliDb: Database.Database | undefined;
+  var __moliSql: postgres.Sql | undefined;
 }
 
-function getDb(): Database.Database {
-  if (globalThis.__moliDb) return globalThis.__moliDb;
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const d = new Database(path.join(DATA_DIR, "moli-notes.db"));
-  d.pragma("journal_mode = WAL");
-  d.pragma("busy_timeout = 3000");
-  d.pragma("foreign_keys = ON");
-  d.exec(`
-    CREATE TABLE IF NOT EXISTS folders (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      parent_id TEXT,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-    CREATE TABLE IF NOT EXISTS entries (
-      id TEXT PRIMARY KEY,
-      folder_id TEXT,
-      title TEXT NOT NULL,
-      content TEXT NOT NULL,
-      notes TEXT NOT NULL DEFAULT '',
-      source TEXT NOT NULL DEFAULT '',
-      source_color TEXT NOT NULL DEFAULT '',
-      pinned INTEGER NOT NULL DEFAULT 0,
-      last_used_at TEXT,
-      deleted_at TEXT,
-      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-  `);
-  // 旧库迁移：entries 表缺 source / source_color / deleted_at 列时补齐
-  const cols = d.prepare("PRAGMA table_info(entries)").all() as { name: string }[];
-  if (!cols.some((c) => c.name === "source")) {
-    d.exec("ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT ''");
-  }
-  if (!cols.some((c) => c.name === "source_color")) {
-    d.exec("ALTER TABLE entries ADD COLUMN source_color TEXT NOT NULL DEFAULT ''");
-  }
-  if (!cols.some((c) => c.name === "deleted_at")) {
-    d.exec("ALTER TABLE entries ADD COLUMN deleted_at TEXT");
-  }
-  if (!cols.some((c) => c.name === "copy_count")) {
-    d.exec("ALTER TABLE entries ADD COLUMN copy_count INTEGER NOT NULL DEFAULT 0");
-  }
-  globalThis.__moliDb = d;
-  return d;
+const CONNECTION_URL = process.env.POSTGRES_URL || process.env.DATABASE_URL || "";
+
+function getSql(): postgres.Sql {
+  if (globalThis.__moliSql) return globalThis.__moliSql;
+  if (!CONNECTION_URL) throw new Error("数据库未配置：缺少 POSTGRES_URL 环境变量");
+  // prepare: false —— Neon 池化连接（PgBouncer 事务模式）必需；max: 1 —— 单用户工具，每实例单连接
+  const sql = postgres(CONNECTION_URL, {
+    prepare: false,
+    max: 1,
+    idle_timeout: 20,
+    connect_timeout: 10,
+  });
+  globalThis.__moliSql = sql;
+  return sql;
 }
 
-/** 透明代理：保持 db.prepare(...) 的写法，实际转发到懒加载的连接 */
-const db = new Proxy({} as Database.Database, {
-  get(_target, prop) {
-    const real = getDb() as unknown as Record<string | symbol, unknown>;
-    const value = real[prop];
-    return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(real) : value;
-  },
-});
+let schemaReady: Promise<void> | null = null;
 
-// ---------- 文件夹 ----------
+/** 建表（幂等）：每次实例冷启动执行一次；并发冷启动撞表时忽略 already exists */
+function ensureSchema(sql: postgres.Sql): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = (async () => {
+      try {
+        await sql`
+          CREATE TABLE IF NOT EXISTS folders (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            parent_id TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          )
+        `;
+        await sql`
+          CREATE TABLE IF NOT EXISTS entries (
+            id TEXT PRIMARY KEY,
+            folder_id TEXT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            notes TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT '',
+            source_color TEXT NOT NULL DEFAULT '',
+            pinned BOOLEAN NOT NULL DEFAULT false,
+            last_used_at TIMESTAMPTZ,
+            deleted_at TIMESTAMPTZ,
+            copy_count INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          )
+        `;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/already exists/i.test(msg)) {
+          schemaReady = null; // 失败不缓存，下次重试
+          throw err;
+        }
+      }
+    })();
+  }
+  return schemaReady;
+}
+
+async function getDb(): Promise<postgres.Sql> {
+  const sql = getSql();
+  await ensureSchema(sql);
+  return sql;
+}
+
+// ---------- 行映射（timestamptz 返回 Date，统一转 ISO 字符串） ----------
 
 type Row = Record<string, unknown>;
+
+const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : (v as string));
+const isoOrNull = (v: unknown): string | null =>
+  v === null || v === undefined ? null : v instanceof Date ? v.toISOString() : (v as string);
 
 const folderRowMapper = (r: Row): Folder => ({
   id: r.id as string,
   name: r.name as string,
   parentId: (r.parent_id as string | null) ?? null,
   sortOrder: r.sort_order as number,
-  createdAt: r.created_at as string,
+  createdAt: iso(r.created_at),
 });
-
-export function listFolders(): Folder[] {
-  return (db.prepare("SELECT * FROM folders ORDER BY sort_order, created_at").all() as Row[]).map(
-    folderRowMapper
-  );
-}
-
-/** 各文件夹直接条目数 + 汇总计数（侧边栏徽标用；只统计未删除条目） */
-export function entryCountsByFolder(): {
-  byFolder: Record<string, number>;
-  unsorted: number;
-  total: number;
-  trash: number;
-} {
-  const rows = db
-    .prepare(
-      "SELECT folder_id, COUNT(*) AS c FROM entries WHERE deleted_at IS NULL AND folder_id IS NOT NULL GROUP BY folder_id"
-    )
-    .all() as { folder_id: string; c: number }[];
-  const byFolder: Record<string, number> = {};
-  for (const r of rows) byFolder[r.folder_id] = r.c;
-  const row = db
-    .prepare(
-      // 聚合计数必须按软删状态分组：total/unsorted/recent 只统计未删除条目，trash 只统计已删除条目
-      "SELECT SUM(CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END) AS total, SUM(CASE WHEN deleted_at IS NULL AND folder_id IS NULL THEN 1 ELSE 0 END) AS unsorted, SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END) AS trash FROM entries"
-    )
-    .get() as { total: number | null; unsorted: number | null; trash: number | null };
-  return {
-    byFolder,
-    unsorted: row.unsorted || 0,
-    total: row.total || 0,
-    trash: row.trash || 0,
-  };
-}
-
-export function getFolder(id: string): Folder | undefined {
-  const r = db.prepare("SELECT * FROM folders WHERE id = ?").get(id) as Row | undefined;
-  return r ? folderRowMapper(r) : undefined;
-}
-
-export function createFolder(name: string, parentId: string | null): Folder {
-  const id = crypto.randomUUID();
-  const max = db
-    .prepare("SELECT COALESCE(MAX(sort_order), 0) AS m FROM folders WHERE parent_id IS ?")
-    .get(parentId) as { m: number };
-  db.prepare("INSERT INTO folders (id, name, parent_id, sort_order) VALUES (?, ?, ?, ?)").run(
-    id,
-    name,
-    parentId,
-    max.m + 1
-  );
-  return getFolder(id)!;
-}
-
-export function renameFolder(id: string, name: string) {
-  db.prepare("UPDATE folders SET name = ? WHERE id = ?").run(name, id);
-}
-
-export function moveFolder(id: string, parentId: string | null) {
-  db.prepare("UPDATE folders SET parent_id = ? WHERE id = ?").run(parentId, id);
-}
-
-/** 批量更新文件夹顺序/归属（拖拽排序事务：同级重排 + 跨层级插入一次完成） */
-export function reorderFolders(items: { id: string; parentId: string | null; sortOrder: number }[]) {
-  const d = getDb();
-  const tx = d.transaction(() => {
-    const upd = d.prepare("UPDATE folders SET parent_id = ?, sort_order = ? WHERE id = ?");
-    for (const it of items) upd.run(it.parentId, it.sortOrder, it.id);
-  });
-  tx();
-}
-
-export function deleteFolderIfEmpty(id: string): boolean {
-  const child = db.prepare("SELECT 1 FROM folders WHERE parent_id = ? LIMIT 1").get(id);
-  if (child) return false;
-  const entry = db.prepare("SELECT 1 FROM entries WHERE folder_id = ? LIMIT 1").get(id);
-  if (entry) return false;
-  db.prepare("DELETE FROM folders WHERE id = ?").run(id);
-  return true;
-}
-
-// ---------- 条目 ----------
-
-const ENTRY_SELECT = `
-  SELECT e.*, f.name AS folder_name
-  FROM entries e
-  LEFT JOIN folders f ON f.id = e.folder_id
-`;
 
 const entryRowMapper = (r: Row): Entry => ({
   id: r.id as string,
@@ -182,78 +101,173 @@ const entryRowMapper = (r: Row): Entry => ({
   source: (r.source as string) ?? "",
   sourceColor: (r.source_color as string) ?? "",
   pinned: !!r.pinned,
-  lastUsedAt: (r.last_used_at as string | null) ?? null,
+  lastUsedAt: isoOrNull(r.last_used_at),
   copyCount: ((r.copy_count as number | null) ?? 0) > 0 ? (r.copy_count as number) : 0,
-  deletedAt: (r.deleted_at as string | null) ?? null,
-  createdAt: r.created_at as string,
-  updatedAt: r.updated_at as string,
+  deletedAt: isoOrNull(r.deleted_at),
+  createdAt: iso(r.created_at),
+  updatedAt: iso(r.updated_at),
 });
+
+// ---------- 文件夹 ----------
+
+export async function listFolders(): Promise<Folder[]> {
+  const sql = await getDb();
+  const rows = await sql`SELECT * FROM folders ORDER BY sort_order, created_at`;
+  return rows.map((r) => folderRowMapper(r));
+}
+
+/** 各文件夹直接条目数 + 汇总计数（侧边栏徽标用；只统计未删除条目） */
+export async function entryCountsByFolder(): Promise<{
+  byFolder: Record<string, number>;
+  unsorted: number;
+  total: number;
+  trash: number;
+}> {
+  const sql = await getDb();
+  const rows = (await sql`
+    SELECT folder_id, COUNT(*)::int AS c
+    FROM entries
+    WHERE deleted_at IS NULL AND folder_id IS NOT NULL
+    GROUP BY folder_id
+  `) as { folder_id: string; c: number }[];
+  const byFolder: Record<string, number> = {};
+  for (const r of rows) byFolder[r.folder_id] = r.c;
+  const row = (await sql`
+    SELECT
+      SUM(CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END)::int AS total,
+      SUM(CASE WHEN deleted_at IS NULL AND folder_id IS NULL THEN 1 ELSE 0 END)::int AS unsorted,
+      SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END)::int AS trash
+    FROM entries
+  `)[0] as { total: number | null; unsorted: number | null; trash: number | null };
+  return {
+    byFolder,
+    unsorted: row.unsorted || 0,
+    total: row.total || 0,
+    trash: row.trash || 0,
+  };
+}
+
+export async function getFolder(id: string): Promise<Folder | undefined> {
+  const sql = await getDb();
+  const r = await sql`SELECT * FROM folders WHERE id = ${id}`;
+  return r[0] ? folderRowMapper(r[0]) : undefined;
+}
+
+export async function createFolder(name: string, parentId: string | null): Promise<Folder> {
+  const sql = await getDb();
+  const id = crypto.randomUUID();
+  const max = (await sql`
+    SELECT COALESCE(MAX(sort_order), 0)::int AS m FROM folders WHERE parent_id IS NOT DISTINCT FROM ${parentId}
+  `)[0] as { m: number };
+  await sql`INSERT INTO folders (id, name, parent_id, sort_order) VALUES (${id}, ${name}, ${parentId}, ${max.m + 1})`;
+  return (await getFolder(id))!;
+}
+
+export async function renameFolder(id: string, name: string) {
+  const sql = await getDb();
+  await sql`UPDATE folders SET name = ${name} WHERE id = ${id}`;
+}
+
+export async function moveFolder(id: string, parentId: string | null) {
+  const sql = await getDb();
+  await sql`UPDATE folders SET parent_id = ${parentId} WHERE id = ${id}`;
+}
+
+/** 批量更新文件夹顺序/归属（拖拽排序事务：同级重排 + 跨层级插入一次完成） */
+export async function reorderFolders(items: { id: string; parentId: string | null; sortOrder: number }[]) {
+  const sql = await getDb();
+  await sql.begin(async (tx) => {
+    for (const it of items) {
+      await tx`UPDATE folders SET parent_id = ${it.parentId}, sort_order = ${it.sortOrder} WHERE id = ${it.id}`;
+    }
+  });
+}
+
+export async function deleteFolderIfEmpty(id: string): Promise<boolean> {
+  const sql = await getDb();
+  const child = await sql`SELECT 1 FROM folders WHERE parent_id = ${id} LIMIT 1`;
+  if (child.length) return false;
+  const entry = await sql`SELECT 1 FROM entries WHERE folder_id = ${id} LIMIT 1`;
+  if (entry.length) return false;
+  await sql`DELETE FROM folders WHERE id = ${id}`;
+  return true;
+}
+
+// ---------- 条目 ----------
+
+const ENTRY_SELECT = `
+  SELECT e.*, f.name AS folder_name
+  FROM entries e
+  LEFT JOIN folders f ON f.id = e.folder_id
+`;
 
 const LIST_ORDER = `ORDER BY e.pinned DESC, COALESCE(e.last_used_at, e.updated_at) DESC, e.created_at DESC`;
 
-export function listEntries(opts: {
+export async function listEntries(opts: {
   folderId?: string | null;
   q?: string;
   source?: string;
   kind?: string;
   /** 回收站视图：只看已软删条目（默认排除已删） */
   deleted?: boolean;
-}): Entry[] {
+}): Promise<Entry[]> {
+  const sql = await getDb();
   const where: string[] = [opts.deleted ? "e.deleted_at IS NOT NULL" : "e.deleted_at IS NULL"];
-  const params: unknown[] = [];
+  const params: (string | null)[] = [];
   if (opts.folderId !== undefined) {
-    where.push("e.folder_id IS ?");
+    where.push(`e.folder_id IS NOT DISTINCT FROM $${params.length + 1}`);
     params.push(opts.folderId);
   }
   if (opts.source) {
-    where.push("e.source = ?");
+    where.push(`e.source = $${params.length + 1}`);
     params.push(opts.source);
   }
   if (opts.q) {
-    where.push("(e.title LIKE ? OR e.content LIKE ? OR e.notes LIKE ? OR e.source LIKE ?)");
+    const p1 = params.length + 1;
+    const p2 = params.length + 2;
+    const p3 = params.length + 3;
+    const p4 = params.length + 4;
+    where.push(`(e.title ILIKE $${p1} OR e.content ILIKE $${p2} OR e.notes ILIKE $${p3} OR e.source ILIKE $${p4})`);
     const like = `%${opts.q}%`;
     params.push(like, like, like, like);
   }
-  const rows = (
-    db
-      .prepare(
-        `${ENTRY_SELECT} WHERE ${where.join(" AND ")} ${
-          opts.deleted ? "ORDER BY e.deleted_at DESC" : LIST_ORDER
-        }`
-      )
-      .all(...params) as Row[]
-  ).map(entryRowMapper);
+  const query = `${ENTRY_SELECT} WHERE ${where.join(" AND ")} ${
+    opts.deleted ? "ORDER BY e.deleted_at DESC" : LIST_ORDER
+  }`;
+  const rows = await sql.unsafe<Row[]>(query, params);
   // 类型是内容启发式识别（非存储列），在查询结果上过滤
-  if (opts.kind) return rows.filter((e) => detectKind(e.content) === opts.kind);
-  return rows;
+  if (opts.kind) return rows.map(entryRowMapper).filter((e) => detectKind(e.content) === opts.kind);
+  return rows.map(entryRowMapper);
 }
 
-export function getEntry(id: string): Entry | undefined {
-  const r = db.prepare(`${ENTRY_SELECT} WHERE e.id = ? AND e.deleted_at IS NULL`).get(id) as Row | undefined;
-  return r ? entryRowMapper(r) : undefined;
+export async function getEntry(id: string): Promise<Entry | undefined> {
+  const sql = await getDb();
+  const r = await sql.unsafe<Row[]>(`${ENTRY_SELECT} WHERE e.id = $1 AND e.deleted_at IS NULL`, [id]);
+  return r[0] ? entryRowMapper(r[0]) : undefined;
 }
 
 /** 软删除：移入最近删除（deleted_at 置当前时间），可恢复 */
-export function softDeleteEntry(id: string): boolean {
-  const r = db
-    .prepare("UPDATE entries SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? AND deleted_at IS NULL")
-    .run(id);
-  return r.changes > 0;
+export async function softDeleteEntry(id: string): Promise<boolean> {
+  const sql = await getDb();
+  const r = await sql`UPDATE entries SET deleted_at = now() WHERE id = ${id} AND deleted_at IS NULL`;
+  return r.count > 0;
 }
 
 /** 从最近删除恢复 */
-export function restoreEntry(id: string): Entry | undefined {
-  db.prepare("UPDATE entries SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL").run(id);
+export async function restoreEntry(id: string): Promise<Entry | undefined> {
+  const sql = await getDb();
+  await sql`UPDATE entries SET deleted_at = NULL WHERE id = ${id} AND deleted_at IS NOT NULL`;
   return getEntry(id);
 }
 
 /** 彻底删除（不可恢复） */
-export function purgeEntry(id: string): boolean {
-  const r = db.prepare("DELETE FROM entries WHERE id = ? AND deleted_at IS NOT NULL").run(id);
-  return r.changes > 0;
+export async function purgeEntry(id: string): Promise<boolean> {
+  const sql = await getDb();
+  const r = await sql`DELETE FROM entries WHERE id = ${id} AND deleted_at IS NOT NULL`;
+  return r.count > 0;
 }
 
-export function createEntry(data: {
+export async function createEntry(data: {
   folderId: string | null;
   title: string;
   content: string;
@@ -261,15 +275,17 @@ export function createEntry(data: {
   source?: string;
   sourceColor?: string;
   pinned?: boolean;
-}): Entry {
+}): Promise<Entry> {
+  const sql = await getDb();
   const id = crypto.randomUUID();
-  db.prepare(
-    "INSERT INTO entries (id, folder_id, title, content, notes, source, source_color, pinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(id, data.folderId, data.title, data.content, data.notes, data.source ?? "", data.sourceColor ?? "", data.pinned ? 1 : 0);
-  return getEntry(id)!;
+  await sql`
+    INSERT INTO entries (id, folder_id, title, content, notes, source, source_color, pinned)
+    VALUES (${id}, ${data.folderId}, ${data.title}, ${data.content}, ${data.notes}, ${data.source ?? ""}, ${data.sourceColor ?? ""}, ${data.pinned ? true : false})
+  `;
+  return (await getEntry(id))!;
 }
 
-export function updateEntry(
+export async function updateEntry(
   id: string,
   data: Partial<{
     folderId: string | null;
@@ -280,41 +296,37 @@ export function updateEntry(
     sourceColor: string;
     pinned: boolean;
   }>
-): Entry | undefined {
-  const cur = db.prepare("SELECT * FROM entries WHERE id = ?").get(id) as Row | undefined;
-  if (!cur) return undefined;
-  db.prepare(
-    `UPDATE entries SET
-      folder_id = ?, title = ?, content = ?, notes = ?, source = ?, source_color = ?, pinned = ?,
-      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-     WHERE id = ?`
-  ).run(
-    data.folderId !== undefined ? data.folderId : (cur.folder_id as string | null),
-    data.title !== undefined ? data.title : (cur.title as string),
-    data.content !== undefined ? data.content : (cur.content as string),
-    data.notes !== undefined ? data.notes : (cur.notes as string),
-    data.source !== undefined ? data.source : (cur.source as string),
-    data.sourceColor !== undefined ? data.sourceColor : (cur.source_color as string),
-    data.pinned !== undefined ? (data.pinned ? 1 : 0) : (cur.pinned as number),
-    id
-  );
+): Promise<Entry | undefined> {
+  const sql = await getDb();
+  const cur = await sql`SELECT * FROM entries WHERE id = ${id}`;
+  if (!cur[0]) return undefined;
+  const c = cur[0];
+  await sql`
+    UPDATE entries SET
+      folder_id = ${data.folderId !== undefined ? data.folderId : (c.folder_id as string | null)},
+      title = ${data.title !== undefined ? data.title : (c.title as string)},
+      content = ${data.content !== undefined ? data.content : (c.content as string)},
+      notes = ${data.notes !== undefined ? data.notes : (c.notes as string)},
+      source = ${data.source !== undefined ? data.source : (c.source as string)},
+      source_color = ${data.sourceColor !== undefined ? data.sourceColor : (c.source_color as string)},
+      pinned = ${data.pinned !== undefined ? data.pinned : !!c.pinned},
+      updated_at = now()
+    WHERE id = ${id}
+  `;
   return getEntry(id);
 }
 
-export function touchEntry(id: string) {
+export async function touchEntry(id: string) {
   // 复制上报：刷新使用时间 + 累计复制次数
   // 去重窗口：10 秒内重复复制（连点/重试/分次粘贴）只算一次使用意图，不重复计数
-  db.prepare(
-    `UPDATE entries
-       SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+  const sql = await getDb();
+  await sql`
+    UPDATE entries
+       SET last_used_at = now(),
            copy_count = COALESCE(copy_count, 0) + 1
-       WHERE id = ? AND (last_used_at IS NULL OR last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 seconds'))`
-  ).run(id);
-}
-
-/** 删除条目 = 软删除（移入最近删除，可恢复）；彻底删除用 purgeEntry */
-export function deleteEntry(id: string) {
-  softDeleteEntry(id);
+     WHERE id = ${id}
+       AND (last_used_at IS NULL OR last_used_at < now() - interval '10 seconds')
+  `;
 }
 
 // ---------- 备份导入 ----------
@@ -337,31 +349,45 @@ type EntryIn = {
 };
 
 /** 导入备份（事务）：按 id 覆盖合并，返回导入的条目数。folderId 无效时置空保持一致性 */
-export function importData(folders: FolderIn[], entries: EntryIn[]): number {
-  const d = getDb();
-  const now = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
-  const tx = d.transaction(() => {
+export async function importData(folders: FolderIn[], entries: EntryIn[]): Promise<number> {
+  const sql = await getDb();
+  await sql.begin(async (tx) => {
     const ids = new Set(
-      (d.prepare("SELECT id FROM folders").all() as { id: string }[]).map((r) => r.id)
-    );
-    const insF = d.prepare(
-      `INSERT OR REPLACE INTO folders (id, name, parent_id, sort_order, created_at)
-       VALUES (?, ?, ?, ?, COALESCE(?, ${now}))`
+      (await tx`SELECT id FROM folders`).map((r) => r.id as string)
     );
     for (const f of folders) {
-      insF.run(f.id, f.name, f.parentId, f.sortOrder, f.createdAt);
+      await tx`
+        INSERT INTO folders (id, name, parent_id, sort_order, created_at)
+        VALUES (${f.id}, ${f.name}, ${f.parentId}, ${f.sortOrder}, ${f.createdAt})
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          parent_id = EXCLUDED.parent_id,
+          sort_order = EXCLUDED.sort_order,
+          created_at = COALESCE(EXCLUDED.created_at, folders.created_at)
+      `;
       ids.add(f.id);
     }
-    const insE = d.prepare(
-      `INSERT OR REPLACE INTO entries
-         (id, folder_id, title, content, notes, source, source_color, pinned, last_used_at, copy_count, deleted_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, ${now}), COALESCE(?, ${now}))`
-    );
     for (const e of entries) {
       const folderId = e.folderId && ids.has(e.folderId) ? e.folderId : null;
-      insE.run(e.id, folderId, e.title, e.content, e.notes, e.source, e.sourceColor ?? "", e.pinned ? 1 : 0, e.lastUsedAt, e.copyCount ?? 0, e.deletedAt ?? null, e.createdAt, e.updatedAt);
+      await tx`
+        INSERT INTO entries
+          (id, folder_id, title, content, notes, source, source_color, pinned, last_used_at, copy_count, deleted_at, created_at, updated_at)
+        VALUES (${e.id}, ${folderId}, ${e.title}, ${e.content}, ${e.notes}, ${e.source}, ${e.sourceColor ?? ""}, ${e.pinned}, ${e.lastUsedAt}, ${e.copyCount ?? 0}, ${e.deletedAt ?? null}, ${e.createdAt}, ${e.updatedAt})
+        ON CONFLICT (id) DO UPDATE SET
+          folder_id = EXCLUDED.folder_id,
+          title = EXCLUDED.title,
+          content = EXCLUDED.content,
+          notes = EXCLUDED.notes,
+          source = EXCLUDED.source,
+          source_color = EXCLUDED.source_color,
+          pinned = EXCLUDED.pinned,
+          last_used_at = EXCLUDED.last_used_at,
+          copy_count = EXCLUDED.copy_count,
+          deleted_at = EXCLUDED.deleted_at,
+          created_at = COALESCE(EXCLUDED.created_at, entries.created_at),
+          updated_at = COALESCE(EXCLUDED.updated_at, entries.updated_at)
+      `;
     }
   });
-  tx();
   return entries.length;
 }

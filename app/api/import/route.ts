@@ -56,6 +56,6 @@ export async function POST(req: Request) {
     });
   }
 
-  const imported = importData(folders, entries);
+  const imported = await importData(folders, entries);
   return NextResponse.json({ imported, folders: folders.length });
 }

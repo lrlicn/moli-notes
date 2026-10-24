@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const denied = await requireAuth();
   if (denied) return denied;
-  return NextResponse.json({ folders: listFolders(), counts: entryCountsByFolder() });
+  return NextResponse.json({ folders: await listFolders(), counts: await entryCountsByFolder() });
 }
 
 export async function POST(req: NextRequest) {
@@ -18,8 +18,8 @@ export async function POST(req: NextRequest) {
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   if (!name) return NextResponse.json({ error: "文件夹名称不能为空" }, { status: 400 });
   const parentId = typeof body?.parentId === "string" && body.parentId ? body.parentId : null;
-  if (parentId && !getFolder(parentId)) {
+  if (parentId && !(await getFolder(parentId))) {
     return NextResponse.json({ error: "父文件夹不存在" }, { status: 400 });
   }
-  return NextResponse.json({ folder: createFolder(name, parentId) }, { status: 201 });
+  return NextResponse.json({ folder: await createFolder(name, parentId) }, { status: 201 });
 }
