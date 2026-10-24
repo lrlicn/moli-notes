@@ -1,10 +1,13 @@
 // 登录：校验密码，签发会话 Cookie
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, checkPassword, expectedToken, sessionCookieOptions } from "@/lib/auth";
+import { SESSION_COOKIE, checkPassword, expectedToken, isPasswordConfigured, sessionCookieOptions } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  if (!isPasswordConfigured()) {
+    return NextResponse.json({ error: "服务端未配置 MOLINOTES_PASSWORD，拒绝登录" }, { status: 500 });
+  }
   let password = "";
   try {
     const body = await req.json();

@@ -4,9 +4,16 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 export const SESSION_COOKIE = "mn_session";
-const PASSWORD = process.env.MOLINOTES_PASSWORD || "moli123";
+// 生产环境必须显式配置密码（防止漏配时静默回退到弱密码）；本地开发保留默认便于调试
+const PASSWORD =
+  process.env.MOLINOTES_PASSWORD || (process.env.NODE_ENV === "production" ? "" : "moli123");
 const SECRET = process.env.MOLINOTES_SECRET || `molinotes::${PASSWORD}`;
 const TOKEN_TTL = 60 * 60 * 24 * 30; // 30 天
+
+/** 服务端是否已正确配置登录密码 */
+export function isPasswordConfigured(): boolean {
+  return PASSWORD.length > 0;
+}
 
 export function expectedToken(): string {
   return createHmac("sha256", SECRET).update("molinotes-session-v1").digest("hex");
