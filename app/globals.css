@@ -1,26 +1,119 @@
 @import "tailwindcss";
 
+/* 暗色模式：跟随 .dark 类（由主题开关或系统偏好写入） */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f6f7f9;
+  --surface: #ffffff;
+  --surface-muted: #eff1f4;
+  --foreground: #1b1d22;
+  --muted-foreground: #697180;
+  --border-base: #e4e6eb;
+  --brand: #4b3fe3;
+  --brand-soft: #eef0ff;
+  --brand-foreground: #3a2fd0;
+  --brand-on: #ffffff;
+}
+
+.dark {
+  --background: #101116;
+  --surface: #1f2128;
+  --surface-muted: #17181d;
+  --foreground: #e6e7ea;
+  --muted-foreground: #9aa0aa;
+  --border-base: #2a2d36;
+  --brand: #7265f5;
+  --brand-soft: #232045;
+  --brand-foreground: #c7c9ff;
+  --brand-on: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border-base: var(--border-base);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-on: var(--brand-on);
+  --font-sans: var(--font-fangyuan), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+/* 细滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-base) transparent;
+}
+
+/* 弹层动画 */
+@keyframes mn-fade-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mn-toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.mn-pop {
+  animation: mn-fade-in 0.14s ease-out;
+}
+.mn-toast {
+  animation: mn-toast-in 0.18s ease-out;
+}
+
+/* Tip 悬停提示：Tailwind 未生成命名组变体（group-hover/tip）的规则，用原生 CSS 实现 */
+[data-tip]:hover > [role="tooltip"] {
+  opacity: 1;
+}
+
+/* 触屏设备：点击会先触发 hover 态，导致首次点击只弹气泡不执行按钮——直接禁用 Tip 显示 */
+@media (hover: none) {
+  [data-tip] > [role="tooltip"] {
+    display: none !important;
+  }
+}
+
+/* iPhone 底部/侧边安全区：主布局容器内边距至少让出 home indicator（桌面 env=0 无副作用） */
+.mn-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  padding-left: max(0.5rem, env(safe-area-inset-left));
+  padding-right: max(0.5rem, env(safe-area-inset-right));
+}
+
+/* 中性蒙层小容器：比 surface-muted 更稳的双主题对比（Tailwind 任意值透明度不生成的兜底） */
+.icon-chip {
+  background-color: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+
+/* 逐行复制：行 hover 时显示行尾复制按钮（Tailwind 命名组变体不生成的兜底） */
+.mn-line .mn-line-copy {
+  opacity: 0;
+}
+.mn-line:hover .mn-line-copy {
+  opacity: 1;
+}
+/* 最近删除表格：斑马纹 + hover 高亮（nth-child/hover 特异性组合由原生 CSS 兜底，:hover 须写在 nth-child 之后以同特异性覆盖） */
+.mn-table tbody tr:nth-child(odd) {
+  background-color: var(--surface);
+}
+.mn-table tbody tr:hover {
+  background-color: var(--brand-soft);
 }
