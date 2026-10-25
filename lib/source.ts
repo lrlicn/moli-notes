@@ -1,4 +1,4 @@
-// 条目来源：预设类别与颜色映射（EntryDialog 选择器与 EntryCard 徽章共用）
+// 条目来源：预设类别与颜色映射（EntryDialog 选择器与 EntryRow/EntryPreview 徽章共用）
 import type { CSSProperties } from "react";
 
 export const SOURCE_PRESETS = ["自研项目", "朋友推荐", "网站", "文档", "其他"];

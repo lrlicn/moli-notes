@@ -75,7 +75,7 @@ export default function CommandPalette({ onClose, onCopied, onView }: Props) {
   useEffect(() => {
     const t = setTimeout(async () => {
       try {
-        const r = await api<{ entries: Entry[] }>(`/api/entries?q=${encodeURIComponent(q)}`);
+        const r = await api<{ entries: Entry[] }>(`/api/entries?q=${encodeURIComponent(q)}&limit=15`);
         setResults(q ? r.entries.slice(0, 12) : r.entries.slice(0, 8));
         setActive(0);
       } catch {
@@ -184,7 +184,6 @@ export default function CommandPalette({ onClose, onCopied, onView }: Props) {
                 <span
                   role="button"
                   tabIndex={-1}
-                  title="查看条目（Shift+Enter）"
                   onClick={(ev) => {
                     ev.stopPropagation();
                     view(e);

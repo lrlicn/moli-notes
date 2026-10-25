@@ -103,6 +103,17 @@ body {
   background-color: color-mix(in srgb, var(--foreground) 7%, transparent);
 }
 
+/* 行内图标按钮：半透明蒙层底，在 surface / muted 任意行态下都稳定可见；hover 加深给出明确反馈 */
+.mn-iconbtn {
+  background-color: color-mix(in srgb, var(--foreground) 6%, transparent);
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+.mn-iconbtn:hover {
+  background-color: color-mix(in srgb, var(--foreground) 13%, transparent);
+}
+
 /* 逐行复制：行 hover 时显示行尾复制按钮（Tailwind 命名组变体不生成的兜底） */
 .mn-line .mn-line-copy {
   opacity: 0;

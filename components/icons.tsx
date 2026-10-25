@@ -99,6 +99,10 @@ export const MenuIcon = (p: SVGProps<SVGSVGElement>) => (
 export const GridIcon = (p: SVGProps<SVGSVGElement>) => (
   <I {...p}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></I>
 );
+// 列表视图（多行行目），与 GridIcon 对应作密度切换
+export const ListIcon = (p: SVGProps<SVGSVGElement>) => (
+  <I {...p}><path d="M8 6h13M8 12h13M8 18h13" /><circle cx="3.5" cy="6" r="1" fill="currentColor" stroke="none" /><circle cx="3.5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="3.5" cy="18" r="1" fill="currentColor" stroke="none" /></I>
+);
 export const InboxIcon = (p: SVGProps<SVGSVGElement>) => (
   <I {...p}><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></I>
 );
