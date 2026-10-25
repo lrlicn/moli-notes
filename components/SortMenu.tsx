@@ -30,7 +30,7 @@ export default function SortMenu({ value, onChange }: { value: SortKey; onChange
   }, [open]);
 
   return (
-    <div ref={boxRef} className="relative">
+    <div ref={boxRef} data-menu-open={open ? "" : undefined} className="relative">
       <button
         type="button"
         aria-haspopup="menu"

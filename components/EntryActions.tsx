@@ -39,7 +39,7 @@ export default function EntryActions({ entry, onTogglePin, onEdit, onDelete, cla
   };
 
   return (
-    <div ref={boxRef} className={`relative ${className}`}>
+    <div ref={boxRef} data-menu-open={open ? "" : undefined} className={`relative ${className}`}>
       <button
         type="button"
         aria-label="更多操作"

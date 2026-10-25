@@ -17,6 +17,7 @@ import Toast from "./Toast";
 import Tip from "./Tip";
 import SortMenu, { type SortKey } from "./SortMenu";
 import ShortcutsDialog from "./ShortcutsDialog";
+import FolderMoveMenu from "./FolderMoveMenu";
 import { CheckIcon, InboxIcon, MenuIcon, PlusIcon, TrashIcon, XIcon } from "./icons";
 
 type Scope =
@@ -602,6 +603,8 @@ export default function AppShell({ ownerLabel }: { ownerLabel?: string }) {
       if (dialog || paletteOpen || confirm || shortcutsOpen) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // 任一弹出菜单（SortMenu / ⋯ / 移动到…）展开时全局快捷键整体让位：菜单自身已处理 Esc/点外关闭，避免 n/e/p 穿透、Esc 双关
+      if (document.querySelector("[data-menu-open]")) return;
       // Enter/Space 是交互控件的原生激活键：焦点落在按钮/链接/菜单项/列表行上时让位给控件自身，避免被全局快捷键劫持
       if ((e.key === "Enter" || e.key === " ") && t?.closest('button, a, select, [role="menuitem"], [role="button"]')) return;
       if (scope.type === "deleted") return;
@@ -900,25 +903,11 @@ export default function AppShell({ ownerLabel }: { ownerLabel?: string }) {
                   <span className="text-muted-foreground">
                     已选 <span className="font-medium tabular-nums text-foreground">{checked.size}</span> 项
                   </span>
-                  <select
-                    value=""
+                  <FolderMoveMenu
+                    folders={folders}
                     disabled={checked.size === 0}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v) void batchMove(v === "__unsorted" ? null : v);
-                    }}
-                    className="cursor-pointer rounded-md border border-border-base bg-surface px-1.5 py-1 text-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <option value="" disabled>
-                      移动到…
-                    </option>
-                    <option value="__unsorted">未分类</option>
-                    {folders.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </select>
+                    onMove={(id) => void batchMove(id)}
+                  />
                   <button
                     type="button"
                     disabled={checked.size === 0}
