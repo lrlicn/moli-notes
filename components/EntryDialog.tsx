@@ -1,11 +1,33 @@
 "use client";
 
-// 新建 / 编辑条目弹窗
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+// 新建 / 编辑条目弹窗：标题栏可拖动定位（钳制视口内），面板右下角可缩放并记忆尺寸
+// 内容为核心字段：随面板弹性增高，实时类型识别徽章；Ctrl/⌘+Enter 快捷保存
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type FormEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  type SVGProps,
+} from "react";
 import { api } from "@/lib/client";
+import { detectKind, kindLabel } from "@/lib/detect";
 import type { Entry, Folder } from "@/lib/types";
 import { SOURCE_COLORS, SOURCE_PRESETS, sourceStyle } from "@/lib/source";
-import { CheckIcon, ChevronDownIcon, PencilIcon, XIcon } from "./icons";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  CodeIcon,
+  FolderIcon,
+  GlobeIcon,
+  PencilIcon,
+  TerminalIcon,
+  TextIcon,
+  XIcon,
+} from "./icons";
 
 interface Props {
   folders: Folder[];
@@ -14,6 +36,33 @@ interface Props {
   defaultFolderId: string | null;
   onClose(): void;
   onSaved(entry: Entry): void;
+}
+
+// 弹窗尺寸记忆：右下角缩放后写 localStorage，下次打开恢复
+const SIZE_KEY = "moli.entryDialog.size";
+const FORM_ID = "entry-dialog-form";
+
+const KIND_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
+  url: GlobeIcon,
+  path: FolderIcon,
+  command: TerminalIcon,
+  code: CodeIcon,
+  text: TextIcon,
+};
+
+/** 读取并钳制持久化宽高（防止上次大屏的尺寸越界本次视口） */
+function readSavedSize(): { w: number; h: number } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const p = JSON.parse(window.localStorage.getItem(SIZE_KEY) ?? "");
+    if (typeof p?.w !== "number" || typeof p?.h !== "number") return null;
+    return {
+      w: Math.min(Math.max(p.w, 380), window.innerWidth - 32),
+      h: Math.min(Math.max(p.h, 280), window.innerHeight - 32),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export default function EntryDialog({ folders, mode, entry, defaultFolderId, onClose, onSaved }: Props) {
@@ -26,6 +75,15 @@ export default function EntryDialog({ folders, mode, entry, defaultFolderId, onC
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const ref = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // 拖动偏移（相对默认居中位）；left0/top0 为按下时面板未变换的视口位置，用于钳制
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ mx: number; my: number; bx: number; by: number; left0: number; top0: number; w: number } | null>(null);
+  // 缩放后的宽高；null = 默认限宽、高度自适应
+  const [size, setSize] = useState<{ w: number; h: number } | null>(readSavedSize);
+  // 缩放手柄拖拽起始数据；mode：x=右缘 y=底缘 xy=右下角
+  const resizeRef = useRef<{ mx: number; my: number; bw: number; bh: number; mode: "x" | "y" | "xy" } | null>(null);
 
   useEffect(() => ref.current?.focus(), []);
   useEffect(() => {
@@ -33,6 +91,69 @@ export default function EntryDialog({ folders, mode, entry, defaultFolderId, onC
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
+
+  // 自定义缩放：原生 CSS resize 在宽度为 100%/限宽时横向拖不动，改为把手 pointer 拖拽，宽高自由
+  function onResizeStart(e: ReactPointerEvent<HTMLDivElement>, mode: "x" | "y" | "xy") {
+    if (e.button !== 0) return;
+    const el = panelRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    resizeRef.current = { mx: e.clientX, my: e.clientY, bw: r.width, bh: r.height, mode };
+    // 把默认 auto 尺寸固化为 px，后续拖拽以此为基准
+    setSize({ w: Math.round(r.width), h: Math.round(r.height) });
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onResizeMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const d = resizeRef.current;
+    if (!d) return;
+    // 下限保证字段可用，上限不超出视口
+    const w = d.mode === "y" ? d.bw : Math.min(Math.max(d.bw + e.clientX - d.mx, 380), window.innerWidth - 32);
+    const h = d.mode === "x" ? d.bh : Math.min(Math.max(d.bh + e.clientY - d.my, 260), window.innerHeight - 32);
+    setSize({ w: Math.round(w), h: Math.round(h) });
+  }
+
+  function onResizeEnd(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!resizeRef.current) return;
+    resizeRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    if (size) {
+      try {
+        localStorage.setItem(SIZE_KEY, JSON.stringify(size));
+      } catch {
+        /* localStorage 不可用时静默跳过 */
+      }
+    }
+  }
+
+  function onDragStart(e: ReactPointerEvent<HTMLDivElement>) {
+    // 关闭按钮让位给点击；仅左键
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+    const r = panelRef.current?.getBoundingClientRect();
+    if (!r) return;
+    dragRef.current = { mx: e.clientX, my: e.clientY, bx: pos.x, by: pos.y, left0: r.left - pos.x, top0: r.top - pos.y, w: r.width };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onDragMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const d = dragRef.current;
+    if (!d) return;
+    // 钳制：面板距左右/上至少 8px，且顶栏至少留 56px 在视口内（保证还能拖回来）
+    const minLeft = 8 - d.left0;
+    const maxLeft = Math.max(minLeft, window.innerWidth - 8 - d.w);
+    const minTop = 8 - d.top0;
+    const maxTop = Math.max(minTop, window.innerHeight - 56 - d.top0);
+    setPos({
+      x: Math.min(Math.max(d.bx + e.clientX - d.mx, minLeft), maxLeft),
+      y: Math.min(Math.max(d.by + e.clientY - d.my, minTop), maxTop),
+    });
+  }
+
+  function onDragEnd(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  }
 
   // 文件夹下拉选项（按父层级展开排列，附带缩进深度）
   const options = useMemo(() => {
@@ -87,78 +208,126 @@ export default function EntryDialog({ folders, mode, entry, defaultFolderId, onC
     }
   }
 
-  const inputCls =
-    "w-full rounded-lg border border-border-base bg-surface px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 transition-colors";
+  // 内容类型实时识别：徽章展示在编辑器标题行右侧
+  const kind = detectKind(content);
+  const KindIcon = KIND_ICONS[kind] ?? TextIcon;
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 pt-[8vh]" onMouseDown={onClose}>
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
-        className="mn-pop w-full max-w-lg rounded-2xl border border-border-base bg-surface p-6 shadow-2xl"
+        style={{ width: size?.w, height: size?.h, transform: `translate(${pos.x}px, ${pos.y}px)` }}
+        className={`mn-pop relative flex flex-col overflow-hidden rounded-2xl border border-border-base bg-surface p-6 shadow-2xl ${size ? "" : "w-full max-w-lg"}`}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold">{mode === "create" ? "新建条目" : "编辑条目"}</h2>
+        {/* 标题栏：整条即拖动把手（关闭按钮除外），位置钳制在视口内 */}
+        <div
+          className="mb-4 flex shrink-0 touch-none cursor-grab items-center justify-between select-none active:cursor-grabbing"
+          onPointerDown={onDragStart}
+          onPointerMove={onDragMove}
+          onPointerUp={onDragEnd}
+          onPointerCancel={onDragEnd}
+        >
+          <h2 className="text-sm font-medium text-muted-foreground">{mode === "create" ? "新建条目" : "编辑条目"}</h2>
           <button
             type="button"
             aria-label="关闭"
             onClick={onClose}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-surface-muted hover:text-foreground"
+            className="cursor-pointer rounded-md p-1.5 text-muted-foreground hover:bg-surface-muted hover:text-foreground"
           >
             <XIcon />
           </button>
         </div>
-        <form onSubmit={onSubmit} className="space-y-3.5">
-          <div>
-            <label className="mb-1 block text-sm font-medium">标题</label>
+        <form
+          id={FORM_ID}
+          ref={formRef}
+          onSubmit={onSubmit}
+          onKeyDown={(e) => {
+            // Ctrl/⌘ + Enter 表单内任意焦点处保存
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+              e.preventDefault();
+              formRef.current?.requestSubmit();
+            }
+          }}
+          className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto"
+        >
+          {/* 标题：无边框页头式，搜索/识别用；大号但不与内容抢框 */}
+          <div className="shrink-0">
             <input
               ref={ref}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="例如：Tailwind CSS 文档"
-              className={inputCls}
+              placeholder="给这条起个名…"
+              aria-label="标题"
+              className="w-full border-b border-transparent bg-transparent pb-1 text-lg font-semibold outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-brand/40"
             />
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">内容（链接 / 路径 / 命令 / 代码）</label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              rows={3}
-              placeholder={"https://…\nD:\\projects\\demo\npnpm dev\nssh root@…"}
-              className={`${inputCls} font-mono`}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">会自动识别类型并生成对应的复制按钮</p>
+          {/* 内容：被复制的主 payload，占最大区；下沉编辑器卡 + 强焦点环 + 实时识别徽章 */}
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2">
+              <label className="text-sm font-medium text-foreground">内容</label>
+              {content.trim() ? (
+                <span className="flex items-center gap-1 rounded-md bg-brand-soft px-1.5 py-0.5 text-xs font-medium text-brand-foreground">
+                  <KindIcon width={12} height={12} />
+                  {kindLabel(kind)}
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground">链接 / 路径 / 命令 / 代码</span>
+              )}
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-border-base bg-background transition-colors focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={5}
+                placeholder={"https://…\nD:\\projects\\demo\npnpm dev\nssh root@…"}
+                className="min-h-[8rem] w-full flex-1 resize-none rounded-xl bg-transparent px-3 py-2.5 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground/60"
+              />
+            </div>
+            <p className="mt-1 shrink-0 text-xs text-muted-foreground">会自动识别类型并生成对应的复制按钮</p>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">备注（可选）</label>
+          {/* 补充信息：备注 + 来源 + 文件夹降级为底部一个分组，视觉变轻 */}
+          <div className="shrink-0 rounded-xl border border-border-base bg-surface-muted/50 p-3">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">补充信息（可选）</p>
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="用途、注意事项等"
-              className={inputCls}
+              placeholder="备注：用途、注意事项等"
+              aria-label="备注"
+              className="w-full border-b border-border-base bg-transparent pb-1.5 text-sm outline-none placeholder:text-muted-foreground/70 focus:border-brand"
             />
+            <div className="mt-2.5 grid grid-cols-2 gap-2">
+              <div>
+                <p className="mb-1 text-xs text-muted-foreground">来源</p>
+                <SourceSelect
+                  value={source}
+                  color={sourceColor}
+                  onCommit={(v, c) => {
+                    setSource(v);
+                    setSourceColor(c);
+                  }}
+                />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-muted-foreground">文件夹</p>
+                <FolderSelect value={folderId} options={options} onChange={setFolderId} />
+              </div>
+            </div>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              来源 <span className="font-normal text-muted-foreground">（记录信息从哪里来）</span>
-            </label>
-            <SourceSelect
-              value={source}
-              color={sourceColor}
-              onCommit={(v, c) => {
-                setSource(v);
-                setSourceColor(c);
-              }}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">所属文件夹</label>
-            <FolderSelect value={folderId} options={options} onChange={setFolderId} />
-          </div>
-          {error && <p className="text-sm text-red-500">{error}</p>}
-          <div className="flex justify-end gap-2 pt-1">
+        </form>
+        {error && <p className="mt-2 shrink-0 text-sm text-red-500">{error}</p>}
+        {/* 底部：快捷键提示条（与列表页提示条同款）+ 操作按钮；在滚动区外，面板缩小也始终可见 */}
+        <div className="mt-4 flex shrink-0 items-center justify-between gap-3">
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Kbd>Ctrl</Kbd>
+            <Kbd>Enter</Kbd>
+            <span>保存</span>
+            <span className="mx-0.5 text-muted-foreground/60">·</span>
+            <span>拖标题栏移动 · 右下角缩放</span>
+          </span>
+          <div className="flex shrink-0 gap-2">
             <button
               type="button"
               onClick={onClose}
@@ -168,15 +337,54 @@ export default function EntryDialog({ folders, mode, entry, defaultFolderId, onC
             </button>
             <button
               type="submit"
+              form={FORM_ID}
               disabled={saving}
               className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-on hover:opacity-90 disabled:opacity-50"
             >
               {saving ? "保存中…" : "保存"}
             </button>
           </div>
-        </form>
+        </div>
+        {/* 缩放手柄：右缘调宽 / 底缘调高 / 右下角双向，结束后持久化尺寸 */}
+        <div
+          aria-hidden
+          className="absolute top-8 right-0 bottom-8 w-1.5 cursor-ew-resize touch-none"
+          onPointerDown={(e) => onResizeStart(e, "x")}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeEnd}
+          onPointerCancel={onResizeEnd}
+        />
+        <div
+          aria-hidden
+          className="absolute bottom-0 left-8 right-8 h-1.5 cursor-ns-resize touch-none"
+          onPointerDown={(e) => onResizeStart(e, "y")}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeEnd}
+          onPointerCancel={onResizeEnd}
+        />
+        <div
+          aria-hidden
+          className="absolute right-0 bottom-0 flex h-4 w-4 cursor-nwse-resize touch-none items-end justify-end p-[3px] text-muted-foreground/40 hover:text-muted-foreground"
+          onPointerDown={(e) => onResizeStart(e, "xy")}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeEnd}
+          onPointerCancel={onResizeEnd}
+        >
+          <svg width="9" height="9" viewBox="0 0 9 9" fill="none" aria-hidden>
+            <path d="M8 2 2 8M8 5.5 5.5 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+        </div>
       </div>
     </div>
+  );
+}
+
+/** 提示条键帽：与列表页提示条同款（11px 常规字体、细边框、低对比） */
+function Kbd({ children }: { children: ReactNode }) {
+  return (
+    <kbd className="inline-flex items-center justify-center rounded border border-border-base bg-surface px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground">
+      {children}
+    </kbd>
   );
 }
 
@@ -263,9 +471,10 @@ function SourceSelect({
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          {/* 面板 overflow-hidden 会裁切浮层：来源在表单下部，改为向上弹出 */}
           <div
             role="listbox"
-            className="mn-pop absolute z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-border-base bg-surface p-1 shadow-lg"
+            className="mn-pop absolute bottom-full z-50 mb-1 max-h-64 w-full overflow-y-auto rounded-xl border border-border-base bg-surface p-1 shadow-lg"
           >
             {customMode ? (
               <div className="p-1">
@@ -414,9 +623,10 @@ function FolderSelect({
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          {/* 面板 overflow-hidden 会裁切浮层：文件夹是末位字段，改为向上弹出 */}
           <div
             role="listbox"
-            className="mn-pop absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-border-base bg-surface p-1 shadow-lg"
+            className="mn-pop absolute bottom-full z-50 mb-1 max-h-56 w-full overflow-y-auto rounded-xl border border-border-base bg-surface p-1 shadow-lg"
           >
             <button
               type="button"

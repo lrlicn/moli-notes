@@ -1,13 +1,25 @@
 // 客户端通用工具：API 请求封装 + 剪贴板复制
 
+/** 携带状态码与响应体的 API 错误（如 429 的 retryAfter）；普通调用方按 Error.message 使用不受影响 */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public body: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error || `请求失败 (${res.status})`);
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    throw new ApiError((body.error as string) || `请求失败 (${res.status})`, res.status, body);
   }
   return res.json() as Promise<T>;
 }

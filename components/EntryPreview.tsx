@@ -8,7 +8,7 @@ import { copyLabel, detectKind, kindLabel } from "@/lib/detect";
 import { formatDate, formatRelative } from "@/lib/format";
 import { sourceStyle } from "@/lib/source";
 import type { Entry, EntryKind } from "@/lib/types";
-import { CodeIcon, CopyIcon, FolderIcon, GlobeIcon, TerminalIcon, TextIcon, XIcon } from "./icons";
+import { CodeIcon, CopyIcon, ExternalLinkIcon, FolderIcon, GlobeIcon, TerminalIcon, TextIcon, XIcon } from "./icons";
 import EntryActions from "./EntryActions";
 import Tip from "./Tip";
 import type { ComponentType, ReactNode, SVGProps } from "react";
@@ -41,6 +41,58 @@ function MetaRow({ label, children }: { label: string; children: ReactNode }) {
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 truncate text-sm text-foreground">{children}</dd>
     </div>
+  );
+}
+
+// 链接归一化：www. 开头补 https://，其余原样（detectKind 保证链接类必为 http(s)/www 开头）
+function toHref(raw: string): string {
+  return /^www\./i.test(raw) ? `https://${raw}` : raw;
+}
+
+// 链接专属：域名可读化小字 + 完整 URL 可点（新标签页打开）
+function UrlValue({ content }: { content: string }) {
+  const href = toHref(content);
+  let host = "";
+  try {
+    host = new URL(href).host;
+  } catch {
+    /* 解析失败则不展示域名小标 */
+  }
+  return (
+    <div className="min-w-0">
+      {host && <p className="mb-1 truncate text-xs text-muted-foreground">{host}</p>}
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="break-all font-mono text-sm leading-7 text-brand hover:underline"
+      >
+        {content}
+      </a>
+    </div>
+  );
+}
+
+// 路径专属：按 / \ 分段，父目录与分隔符弱化、末段（文件/目录名）高亮
+function PathValue({ value }: { value: string }) {
+  const parts = value.split(/([\\/])/);
+  let lastIdx = -1;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (parts[i] && parts[i] !== "\\" && parts[i] !== "/") {
+      lastIdx = i;
+      break;
+    }
+  }
+  return (
+    <code className="block break-all font-mono text-sm leading-7">
+      {parts.map((p, i) =>
+        p === "\\" || p === "/" ? (
+          <span key={i} className="text-muted-foreground/50">{p}</span>
+        ) : (
+          <span key={i} className={i === lastIdx ? "text-foreground" : "text-muted-foreground"}>{p}</span>
+        ),
+      )}
+    </code>
   );
 }
 
@@ -139,12 +191,39 @@ export default function EntryPreview({
                   ))}
                 </div>
               ) : (
-                <div className="group relative rounded-xl bg-surface-muted p-4">
-                  <code className="block whitespace-pre-wrap break-all pr-9 font-mono text-sm leading-7 text-foreground">
-                    {entry.content}
-                  </code>
-                  {/* 值级复制：整块 hover 时靠右垂直居中浮出复制按钮（单行时与文本对齐；统一用 Tip，不用原生 title） */}
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100">
+                <div className="group relative flex items-start gap-2 rounded-xl bg-surface-muted p-4">
+                  {/* 按类型专属展示：链接可点 / 命令终端 chip / 路径分段；其余保持等宽原样 */}
+                  <div className="min-w-0 flex-1">
+                    {kind === "url" ? (
+                      <UrlValue content={entry.content} />
+                    ) : kind === "command" ? (
+                      <code className="block break-all font-mono text-sm leading-7 text-foreground">
+                        <span className="mr-2 select-none text-brand">$</span>
+                        {entry.content}
+                      </code>
+                    ) : kind === "path" ? (
+                      <PathValue value={entry.content} />
+                    ) : (
+                      <code className="block whitespace-pre-wrap break-all font-mono text-sm leading-7 text-foreground">
+                        {entry.content}
+                      </code>
+                    )}
+                  </div>
+                  {/* 操作区：链接多一个「打开」，复制常驻；hover 浮出 */}
+                  <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    {kind === "url" && (
+                      <Tip label="新标签页打开" side="left">
+                        <a
+                          href={toHref(entry.content)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="打开链接"
+                          className="mn-iconbtn rounded-md p-1.5 text-muted-foreground hover:text-brand"
+                        >
+                          <ExternalLinkIcon width={14} height={14} />
+                        </a>
+                      </Tip>
+                    )}
                     <Tip label="复制内容" side="left">
                       <button
                         type="button"
@@ -155,7 +234,7 @@ export default function EntryPreview({
                         <CopyIcon width={14} height={14} />
                       </button>
                     </Tip>
-                  </span>
+                  </div>
                 </div>
               )}
 

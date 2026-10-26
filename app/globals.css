@@ -79,6 +79,18 @@ body {
   animation: mn-toast-in 0.18s ease-out;
 }
 
+/* 登录失败抖动反馈：密码错误时输入框水平轻震 */
+@keyframes mn-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+.mn-shake {
+  animation: mn-shake 0.3s ease-in-out;
+}
+
 /* Tip 悬停提示：Tailwind 未生成命名组变体（group-hover/tip）的规则，用原生 CSS 实现 */
 [data-tip]:hover > [role="tooltip"] {
   opacity: 1;

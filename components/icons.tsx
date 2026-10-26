@@ -30,6 +30,10 @@ export const UploadIcon = (p: SVGProps<SVGSVGElement>) => (
 export const GlobeIcon = (p: SVGProps<SVGSVGElement>) => (
   <I {...p}><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a13.5 13.5 0 0 1 0 18M12 3a13.5 13.5 0 0 0 0 18" /></I>
 );
+// 外部链接（方框 + 右上箭头），链接类预览的「新标签页打开」
+export const ExternalLinkIcon = (p: SVGProps<SVGSVGElement>) => (
+  <I {...p}><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" /></I>
+);
 export const FolderIcon = (p: SVGProps<SVGSVGElement>) => (
   <I {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></I>
 );
@@ -70,6 +74,13 @@ export const PencilIcon = (p: SVGProps<SVGSVGElement>) => (
 );
 export const XIcon = (p: SVGProps<SVGSVGElement>) => (
   <I {...p}><path d="M18 6 6 18M6 6l12 12" /></I>
+);
+// 密码显隐切换（眼睛 开/闭）
+export const EyeIcon = (p: SVGProps<SVGSVGElement>) => (
+  <I {...p}><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></I>
+);
+export const EyeOffIcon = (p: SVGProps<SVGSVGElement>) => (
+  <I {...p}><path d="M10.7 5.2A10 10 0 0 1 12 5c6.4 0 10 7 10 7a13.2 13.2 0 0 1-2.1 3.1" /><path d="M6.6 6.7C3.8 8.3 2 12 2 12s3.6 7 10 7c1.9 0 3.6-.5 5.1-1.3" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /><path d="m2 2 20 20" /></I>
 );
 export const ChevronRightIcon = (p: SVGProps<SVGSVGElement>) => (
   <I {...p}><path d="m9 18 6-6-6-6" /></I>
