@@ -319,13 +319,14 @@ export default function EntryDialog({ folders, mode, entry, defaultFolderId, onC
         </form>
         {error && <p className="mt-2 shrink-0 text-sm text-red-500">{error}</p>}
         {/* 底部：快捷键提示条（与列表页提示条同款）+ 操作按钮；在滚动区外，面板缩小也始终可见 */}
-        <div className="mt-4 flex shrink-0 items-center justify-between gap-3">
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="@container mt-4 flex shrink-0 items-center justify-between gap-3">
+          <span className="flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
             <Kbd>Ctrl</Kbd>
             <Kbd>Enter</Kbd>
             <span>保存</span>
-            <span className="mx-0.5 text-muted-foreground/60">·</span>
-            <span>拖标题栏移动 · 右下角缩放</span>
+            {/* 辅助说明：按面板宽度显隐（@container 非视口），窄面板直接隐藏避免换行撑高挤压底部 */}
+            <span className="mx-0.5 hidden text-muted-foreground/60 @md:inline">·</span>
+            <span className="hidden @md:inline">拖标题栏移动 · 右下角缩放</span>
           </span>
           <div className="flex shrink-0 gap-2">
             <button
@@ -382,7 +383,7 @@ export default function EntryDialog({ folders, mode, entry, defaultFolderId, onC
 /** 提示条键帽：与列表页提示条同款（11px 常规字体、细边框、低对比） */
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="inline-flex items-center justify-center rounded border border-border-base bg-surface px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground">
+    <kbd className="inline-flex shrink-0 items-center justify-center rounded border border-border-base bg-surface px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground">
       {children}
     </kbd>
   );

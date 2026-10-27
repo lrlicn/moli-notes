@@ -632,7 +632,10 @@ export default function AppShell({ ownerLabel }: { ownerLabel?: string }) {
         const idx = Math.max(visibleEntries.findIndex((x) => x.id === selectedId), 0);
         const delta = e.key === "ArrowDown" ? 1 : -1;
         const next = Math.min(Math.max(idx + delta, 0), visibleEntries.length - 1);
-        setSelectedId(visibleEntries[next].id);
+        const nextId = visibleEntries[next].id;
+        setSelectedId(nextId);
+        // 漫游焦点：DOM 焦点随选择移动，主题色 focus ring 也随之跟随（preventScroll 交给下方 scrollIntoView 处理）
+        document.querySelector<HTMLElement>(`[data-entry-id="${nextId}"]`)?.focus({ preventScroll: true });
         return;
       }
       if (e.key === "Enter") {

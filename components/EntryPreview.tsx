@@ -49,18 +49,46 @@ function toHref(raw: string): string {
   return /^www\./i.test(raw) ? `https://${raw}` : raw;
 }
 
+// 站点图标：走服务端代理 /api/favicon（抓首页解析 <link rel=icon> 真实地址），命中现代自定义路径图标
+// 取不到（内网/无图标/超时）时 onError 自动隐藏；key={origin} 强制换站重挂载，避免复用已隐藏的 <img>
+function Favicon({ origin, size = 14 }: { origin: string; size?: number }) {
+  return (
+    <img
+      src={`/api/favicon?u=${encodeURIComponent(origin)}`}
+      width={size}
+      height={size}
+      alt=""
+      aria-hidden
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      onError={(e) => (e.currentTarget.style.display = "none")}
+      className="shrink-0 rounded-sm object-contain"
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
 // 链接专属：域名可读化小字 + 完整 URL 可点（新标签页打开）
 function UrlValue({ content }: { content: string }) {
   const href = toHref(content);
   let host = "";
+  let origin = "";
   try {
-    host = new URL(href).host;
+    const u = new URL(href);
+    host = u.host;
+    origin = u.origin; // 沿用链接自身协议，http-only 站点也能命中
   } catch {
     /* 解析失败则不展示域名小标 */
   }
   return (
     <div className="min-w-0">
-      {host && <p className="mb-1 truncate text-xs text-muted-foreground">{host}</p>}
+      {host && (
+        <p className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Favicon key={origin} origin={origin} />
+          <span className="min-w-0 truncate">{host}</span>
+        </p>
+      )}
       <a
         href={href}
         target="_blank"
@@ -203,6 +231,11 @@ export default function EntryPreview({
                       </code>
                     ) : kind === "path" ? (
                       <PathValue value={entry.content} />
+                    ) : kind === "text" ? (
+                      /* 纯文本用正文字体（方元体 sans）：font-mono 无中文字形会回退到默认衬线体，与其他内容不统一 */
+                      <p className="whitespace-pre-wrap break-words text-sm leading-7 text-foreground">
+                        {entry.content}
+                      </p>
                     ) : (
                       <code className="block whitespace-pre-wrap break-all font-mono text-sm leading-7 text-foreground">
                         {entry.content}

@@ -1,5 +1,5 @@
 // MoliNotes Service Worker：静态资源缓存优先，页面导航网络优先（离线回退缓存页）
-const CACHE = "moli-notes-v2";
+const CACHE = "moli-notes-v3";
 const PRECACHE = ["/login", "/logo.svg", "/icon.svg"];
 
 self.addEventListener("install", (event) => {

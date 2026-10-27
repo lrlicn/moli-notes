@@ -41,7 +41,7 @@
   --color-brand-foreground: var(--brand-foreground);
   --color-brand-on: var(--brand-on);
   --font-sans: var(--font-fangyuan), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-mono: var(--font-geist-mono), var(--font-fangyuan), ui-monospace, monospace;
 }
 
 html {

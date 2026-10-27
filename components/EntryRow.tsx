@@ -45,7 +45,12 @@ export default function EntryRow({ entry, selected, selectMode, checked, onSelec
       onClick={() => (selectMode ? onToggleCheck(entry.id) : onSelect(entry.id))}
       onKeyDown={(e) => {
         // 行自身处理 Enter/Space 激活（与点击一致）；全局键盘已对 [role="button"] 让位，不会重复触发
-        if (e.key === "Enter" || e.key === " ") {
+        // 焦点随 ↑↓ 漫游到行后：Enter 执行主操作=复制，Space 仅选中（驱动预览）
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (selectMode) onToggleCheck(entry.id);
+          else onCopy(entry);
+        } else if (e.key === " ") {
           e.preventDefault();
           if (selectMode) onToggleCheck(entry.id);
           else onSelect(entry.id);
@@ -101,7 +106,7 @@ export default function EntryRow({ entry, selected, selectMode, checked, onSelec
       {/* 内容值：行内主角，占剩余宽度；右侧 hover/选中时浮出复制图标 */}
       <div className="flex min-w-0 flex-1 items-center gap-1">
         <code
-          className={`min-w-0 flex-1 truncate font-mono text-xs ${selected ? "text-foreground" : "text-muted-foreground"}`}
+          className={`min-w-0 flex-1 truncate text-xs ${kind === "text" ? "font-sans" : "font-mono"} ${selected ? "text-foreground" : "text-muted-foreground"}`}
         >
           {firstLine}
           {lineCount > 1 && <span className="ml-1.5 text-muted-foreground/70">共 {lineCount} 行</span>}
